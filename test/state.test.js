@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { emptyState, fingerprint, markFailure, markSuccess, unseenItineraries } from '../src/state.js';
 
 const itinerary = {
-  outbound: { airline: 'Test Air', flightNumber: 'TA123', date: '2026-09-23', departure: '13:00', arrival: '14:10' },
-  inbound: { airline: 'Test Air', flightNumber: 'TA456', date: '2026-09-27', departure: '09:00', arrival: '10:10' }
+  type: 'outbound',
+  leg: { airline: 'Test Air', flightNumber: 'TA123', date: '2026-09-23', departure: '17:00', arrival: '18:10' }
 };
 
 test('같은 조합은 중복 알림하지 않고, 사라졌다 재등장하면 알린다', () => {

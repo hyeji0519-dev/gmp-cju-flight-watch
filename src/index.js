@@ -2,7 +2,7 @@ import { DateTime } from 'luxon';
 import { config, isExpired } from './config.js';
 import { searchGoogleFlights } from './googleFlights.js';
 import { loadState, markFailure, markSuccess, saveState, unseenItineraries } from './state.js';
-import { formatItinerary, sendTelegram } from './telegram.js';
+import { formatMatch, sendTelegram } from './telegram.js';
 
 const now = DateTime.now().setZone(config.timezone);
 if (isExpired(now)) {
@@ -12,14 +12,14 @@ if (isExpired(now)) {
 
 const state = await loadState(config.stateFile);
 try {
-  const itineraries = await searchGoogleFlights(config);
-  const unseen = unseenItineraries(itineraries, state);
-  console.log(`예약 가능 추정 조합 ${itineraries.length}개, 새 조합 ${unseen.length}개.`);
+  const matches = await searchGoogleFlights(config);
+  const unseen = unseenItineraries(matches, state);
+  console.log(`예약 가능 편도 ${matches.length}개, 새 항공편 ${unseen.length}개.`);
   for (const item of unseen) {
-    if (process.env.DRY_RUN === '1') console.log(formatItinerary(item, now.toFormat('yyyy-LL-dd HH:mm:ss')));
-    else await sendTelegram(formatItinerary(item, now.toFormat('yyyy-LL-dd HH:mm:ss')));
+    if (process.env.DRY_RUN === '1') console.log(formatMatch(item, now.toFormat('yyyy-LL-dd HH:mm:ss')));
+    else await sendTelegram(formatMatch(item, now.toFormat('yyyy-LL-dd HH:mm:ss')));
   }
-  await saveState(config.stateFile, markSuccess(state, itineraries));
+  await saveState(config.stateFile, markSuccess(state, matches));
 } catch (error) {
   console.error(`항공편 검색 실패: ${error.message}`);
   const failed = markFailure(state);

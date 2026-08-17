@@ -20,9 +20,9 @@ export async function saveState(file, state) {
   await fs.rename(temp, file);
 }
 
-export function fingerprint(itinerary) {
-  const f = (leg) => [leg.airline, leg.flightNumber, leg.date, leg.departure, leg.arrival].join('|');
-  return `${f(itinerary.outbound)}::${f(itinerary.inbound)}`;
+export function fingerprint(match) {
+  const leg = match.leg || match.outbound;
+  return [match.type || 'legacy', leg.airline, leg.flightNumber, leg.date, leg.departure, leg.arrival].join('|');
 }
 
 export function unseenItineraries(itineraries, state) {

@@ -43,7 +43,7 @@ async function setAirport(page, label, code) {
 }
 
 async function setPassengers(page) {
-  await clickNamed(page, [/passenger/i, /1 passenger/i]);
+  await page.locator('[aria-label="1 passenger"], [aria-label*="passengers"]').first().click();
   const addAdult = page.locator('button[aria-label="Add adult"]').last();
   const addChild = page.locator('button[aria-label="Add child aged 2 to 11"]').last();
   if (!await addAdult.count() || !await addChild.count()) throw new Error('승객 추가 버튼 구조를 인식하지 못했습니다.');
@@ -53,25 +53,27 @@ async function setPassengers(page) {
   await clickNamed(page, [/done/i]);
 }
 
-async function setDates(page, outbound, inbound) {
-  const departure = page.locator('input[aria-label="Departure"]').first();
-  await departure.click();
-
-  const dateLabel = (iso) => new Intl.DateTimeFormat('en-US', {
+async function selectCalendarDate(page, iso) {
+  const label = new Intl.DateTimeFormat('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC'
   }).format(new Date(`${iso}T12:00:00Z`));
-  const selectCalendarDate = async (iso) => {
-    const label = dateLabel(iso);
-    for (let month = 0; month < 18; month += 1) {
-      const day = page.locator(`[aria-label="${label}"]`).last();
-      if (await day.count() && await day.isVisible()) { await day.click(); return; }
-      await page.locator('button[aria-label="Next"]').last().click();
-    }
-    throw new Error(`달력에서 날짜를 찾지 못했습니다: ${label}`);
-  };
+  for (let month = 0; month < 18; month += 1) {
+    const day = page.locator(`[aria-label="${label}"]`).last();
+    if (await day.count() && await day.isVisible()) { await day.click(); return; }
+    await page.locator('button[aria-label="Next"]').last().click();
+  }
+  throw new Error(`달력에서 날짜를 찾지 못했습니다: ${label}`);
+}
 
-  await selectCalendarDate(outbound);
-  await selectCalendarDate(inbound);
+async function setOneWay(page) {
+  await page.locator('[role="combobox"]').filter({ hasText: 'Round trip' }).first().click();
+  await page.getByRole('option', { name: /One way/i }).click();
+}
+
+async function setDate(page, date) {
+  const departure = page.locator('input[aria-label="Departure"]').first();
+  await departure.click();
+  await selectCalendarDate(page, date);
   const calendar = page.getByRole('dialog').last();
   await clickVisible(page.getByRole('button', { name: /^Done/ }));
   await calendar.waitFor({ state: 'hidden', timeout: 10000 });
@@ -79,12 +81,6 @@ async function setDates(page, outbound, inbound) {
 
 async function cards(page) {
   const result = page.locator('[aria-label*="flight with"][aria-label$="Select flight"]');
-  await result.first().waitFor({ state: 'visible', timeout: 60000 });
-  return result;
-}
-
-async function waitForLeg(page, originName) {
-  const result = page.locator(`[aria-label*="flight with"][aria-label*="Leaves ${originName}"][aria-label$="Select flight"]`);
   await result.first().waitFor({ state: 'visible', timeout: 60000 });
   return result;
 }
@@ -107,7 +103,7 @@ async function parseCard(card, date) {
   };
 }
 
-async function searchOnce(config) {
+async function searchOneWay(config, type, leg, notBefore = '00:00') {
   await fs.mkdir(config.artifactsDir, { recursive: true });
   const browser = await chromium.launch({ headless: process.env.HEADLESS !== '0' });
   const context = await browser.newContext({ locale: 'en-US', timezoneId: config.timezone });
@@ -117,42 +113,19 @@ async function searchOnce(config) {
     if (/captcha|unusual traffic/i.test(await page.title()) || await page.locator('iframe[src*="recaptcha"]').count()) {
       throw new Error('Google이 CAPTCHA 또는 비정상 트래픽 확인을 요구했습니다(우회하지 않음).');
     }
+    await setOneWay(page);
     await setPassengers(page);
-    await setAirport(page, 'Where from', config.outbound.from);
-    await setAirport(page, 'Where to', config.outbound.to);
-    await setDates(page, config.outbound.date, config.inbound.date);
+    await setAirport(page, 'Where from', leg.from);
+    await setAirport(page, 'Where to', leg.to);
+    await setDate(page, leg.date);
     await page.locator('button[aria-label="Search"]').click();
 
-    const outboundCards = await cards(page);
-    const outbound = [];
-    for (let i = 0; i < Math.min(await outboundCards.count(), 50); i += 1) {
-      const card = outboundCards.nth(i);
-      const parsed = await parseCard(card, config.outbound.date);
-      if (parsed.bookable && parsed.departure && parsed.departure >= config.outbound.notBefore) {
-        outbound.push({ parsed, label: await card.getAttribute('aria-label') });
-      }
-    }
     const results = [];
-    for (const choice of outbound.slice(0, 5)) {
-      await cards(page);
-      const selectedCard = page.getByRole('link', { name: choice.label, exact: true });
-      await selectedCard.waitFor({ state: 'visible' });
-      await selectedCard.focus();
-      await selectedCard.press('Enter');
-      const inboundCards = await waitForLeg(page, 'Jeju');
-      for (let j = 0; j < Math.min(await inboundCards.count(), 20); j += 1) {
-        const inbound = await parseCard(inboundCards.nth(j), config.inbound.date);
-        if (!inbound.bookable || !inbound.departure || !inbound.arrival) continue;
-        results.push({
-          outbound: choice.parsed,
-          inbound,
-          totalPrice: inbound.price || choice.parsed.price,
-          url: page.url()
-        });
-        if (results.length >= config.maxResults) break;
-      }
-      await page.goBack({ waitUntil: 'domcontentloaded' });
-      await waitForLeg(page, 'Gimpo');
+    const found = await cards(page);
+    for (let i = 0; i < Math.min(await found.count(), 50); i += 1) {
+      const parsed = await parseCard(found.nth(i), leg.date);
+      if (!parsed.bookable || !parsed.departure || !parsed.arrival || parsed.departure < notBefore) continue;
+      results.push({ type, leg: parsed, price: parsed.price, url: page.url() });
       if (results.length >= config.maxResults) break;
     }
     return results;
@@ -169,7 +142,9 @@ export async function searchGoogleFlights(config) {
   let lastError;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
-      return await searchOnce(config);
+      const outbound = await searchOneWay(config, 'outbound', config.outbound, config.outbound.notBefore);
+      const inbound = await searchOneWay(config, 'inbound', config.inbound);
+      return [...outbound, ...inbound].slice(0, config.maxResults);
     } catch (error) {
       lastError = error;
       if (attempt < 2) console.warn(`Google Flights 조회 ${attempt}차 실패, 새 브라우저로 재시도합니다: ${error.message}`);
