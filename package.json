@@ -1,0 +1,21 @@
+{
+  "name": "gmp-cju-flight-watch",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "watch": "node src/index.js",
+    "test": "node --test",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@playwright/test": "^1.55.0",
+    "luxon": "^3.7.2"
+  },
+  "devDependencies": {
+    "eslint": "^9.35.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
