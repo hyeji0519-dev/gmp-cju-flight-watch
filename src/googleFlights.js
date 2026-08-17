@@ -3,6 +3,10 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 
 const clean = (value = '') => value.replace(/\s+/g, ' ').trim();
+export const hasBookablePrice = (text) => {
+  if (/total price is unavailable|price unavailable/i.test(text)) return false;
+  return /₩\s*[\d,]+|[\d,]+\s*(?:Korean won|KRW)/i.test(text);
+};
 const time24 = (text) => {
   const m = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
   if (!m) return null;
@@ -90,9 +94,17 @@ async function parseCard(card, date) {
   const text = `${label} ${clean(await card.innerText())}`;
   const times = [...text.matchAll(/\b\d{1,2}:\d{2}\s*(?:AM|PM)\b/gi)].map((m) => time24(m[0])).filter(Boolean);
   const flight = text.match(/\b([A-Z0-9]{2})\s?(\d{2,4})\b/);
-  const price = text.match(/₩[\d,]+/)?.[0] || null;
+  const price = text.match(/₩\s*[\d,]+|[\d,]+\s*(?:Korean won|KRW)/i)?.[0] || null;
   const airline = label.match(/flight with (.+?)\. Leaves/i)?.[1] || '항공사 확인 필요';
-  return { airline, flightNumber: flight ? `${flight[1]}${flight[2]}` : '편명 확인 필요', date, departure: times[0], arrival: times[1], price };
+  return {
+    airline,
+    flightNumber: flight ? `${flight[1]}${flight[2]}` : '편명 확인 필요',
+    date,
+    departure: times[0],
+    arrival: times[1],
+    price,
+    bookable: hasBookablePrice(text)
+  };
 }
 
 async function searchOnce(config) {
@@ -116,7 +128,7 @@ async function searchOnce(config) {
     for (let i = 0; i < Math.min(await outboundCards.count(), 50); i += 1) {
       const card = outboundCards.nth(i);
       const parsed = await parseCard(card, config.outbound.date);
-      if (parsed.departure && parsed.departure >= config.outbound.notBefore) {
+      if (parsed.bookable && parsed.departure && parsed.departure >= config.outbound.notBefore) {
         outbound.push({ parsed, label: await card.getAttribute('aria-label') });
       }
     }
@@ -130,7 +142,7 @@ async function searchOnce(config) {
       const inboundCards = await waitForLeg(page, 'Jeju');
       for (let j = 0; j < Math.min(await inboundCards.count(), 20); j += 1) {
         const inbound = await parseCard(inboundCards.nth(j), config.inbound.date);
-        if (!inbound.departure || !inbound.arrival) continue;
+        if (!inbound.bookable || !inbound.departure || !inbound.arrival) continue;
         results.push({
           outbound: choice.parsed,
           inbound,
