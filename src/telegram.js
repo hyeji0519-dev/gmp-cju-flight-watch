@@ -19,7 +19,7 @@ export async function sendTelegram(text) {
 
 export function formatMatch(item, checkedAt) {
   const isOutbound = item.type === 'outbound';
-  const title = isOutbound ? '서울→제주 4인 예약 가능 출발편 발견' : '제주→서울 4인 예약 가능 귀국편 발견';
+  const title = isOutbound ? '서울→제주 2인 예약 가능 출발편 발견' : '제주→서울 2인 예약 가능 귀국편 발견';
   const route = isOutbound ? '김포(GMP) → 제주(CJU)' : '제주(CJU) → 김포(GMP)';
   return [
     title,
@@ -31,7 +31,7 @@ export function formatMatch(item, checkedAt) {
     `검색 결과: ${item.url}`,
     `확인 시각(KST): ${checkedAt}`,
     '',
-    '※ 성인 2명+어린이 2명 편도 검색에서 실제 가격과 결과가 반환된 것을 기준으로 한 예약 가능 추정입니다.',
+    '※ 성인 2명 편도 검색에서 실제 가격과 결과가 반환된 것을 기준으로 한 예약 가능 추정입니다.',
     '실시간으로 좌석이 소진될 수 있으니 직접 최종 확인하세요.'
   ].filter(Boolean).join('\n');
 }

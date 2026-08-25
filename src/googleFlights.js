@@ -42,14 +42,13 @@ async function setAirport(page, label, code) {
   await page.locator(`[aria-label*="(${code})"]`).first().click();
 }
 
-async function setPassengers(page) {
+async function setPassengers(page, passengers) {
   await page.locator('[aria-label="1 passenger"], [aria-label*="passengers"]').first().click();
   const addAdult = page.locator('button[aria-label="Add adult"]').last();
   const addChild = page.locator('button[aria-label="Add child aged 2 to 11"]').last();
   if (!await addAdult.count() || !await addChild.count()) throw new Error('승객 추가 버튼 구조를 인식하지 못했습니다.');
-  await addAdult.click(); // adult 1 -> 2
-  await addChild.click();
-  await addChild.click(); // child 0 -> 2
+  for (let i = 1; i < passengers.adults; i += 1) await addAdult.click();
+  for (let i = 0; i < passengers.children; i += 1) await addChild.click();
   await clickNamed(page, [/done/i]);
 }
 
@@ -114,7 +113,7 @@ async function searchOneWay(config, type, leg, notBefore = '00:00') {
       throw new Error('Google이 CAPTCHA 또는 비정상 트래픽 확인을 요구했습니다(우회하지 않음).');
     }
     await setOneWay(page);
-    await setPassengers(page);
+    await setPassengers(page, config.passengers);
     await setAirport(page, 'Where from', leg.from);
     await setAirport(page, 'Where to', leg.to);
     await setDate(page, leg.date);
