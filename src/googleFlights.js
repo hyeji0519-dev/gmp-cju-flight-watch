@@ -80,7 +80,7 @@ async function setDate(page, date) {
 
 async function cards(page) {
   const result = page.locator('[aria-label*="flight with"][aria-label$="Select flight"]');
-  await result.first().waitFor({ state: 'visible', timeout: 60000 });
+  await result.first().waitFor({ state: 'visible', timeout: 90000 });
   return result;
 }
 
@@ -138,15 +138,19 @@ async function searchOneWay(config, type, leg, notBefore = '00:00') {
 }
 
 export async function searchGoogleFlights(config) {
+  const MAX_ATTEMPTS = 3;
   let lastError;
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
       const outbound = await searchOneWay(config, 'outbound', config.outbound, config.outbound.notBefore);
       const inbound = await searchOneWay(config, 'inbound', config.inbound);
       return [...outbound, ...inbound].slice(0, config.maxResults);
     } catch (error) {
       lastError = error;
-      if (attempt < 2) console.warn(`Google Flights 조회 ${attempt}차 실패, 새 브라우저로 재시도합니다: ${error.message}`);
+      if (attempt < MAX_ATTEMPTS) {
+        console.warn(`Google Flights 조회 ${attempt}차 실패, 새 브라우저로 재시도합니다: ${error.message}`);
+        await new Promise((resolve) => setTimeout(resolve, 5000 * attempt));
+      }
     }
   }
   throw lastError;
