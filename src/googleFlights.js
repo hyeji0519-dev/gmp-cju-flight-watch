@@ -139,12 +139,17 @@ async function searchOneWay(config, type, leg, notBefore = '00:00') {
 
 export async function searchGoogleFlights(config) {
   const MAX_ATTEMPTS = 3;
+  const inbounds = config.inbounds ?? (config.inbound ? [config.inbound] : []);
   let lastError;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
       const outbound = await searchOneWay(config, 'outbound', config.outbound, config.outbound.notBefore);
-      const inbound = await searchOneWay(config, 'inbound', config.inbound);
-      return [...outbound, ...inbound].slice(0, config.maxResults);
+      const inboundResults = [];
+      for (const leg of inbounds) {
+        const legResults = await searchOneWay(config, `inbound-${leg.date}`, leg);
+        inboundResults.push(...legResults);
+      }
+      return [...outbound, ...inboundResults].slice(0, config.maxResults);
     } catch (error) {
       lastError = error;
       if (attempt < MAX_ATTEMPTS) {
