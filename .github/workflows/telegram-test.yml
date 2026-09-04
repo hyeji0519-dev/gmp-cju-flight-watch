@@ -1,0 +1,23 @@
+name: Telegram test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send test message
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$CHAT" ]; then
+            echo "Secrets missing"; exit 1
+          fi
+          RESP=$(curl -s -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+            -H 'content-type: application/json' \
+            -d "{\"chat_id\":\"${CHAT}\",\"text\":\"[테스트] 항공권 감시 알림 채널 정상 작동 확인. 이 메시지가 보이면 실제 잔여석 뜨는 순간에도 알림이 옵니다.\"}")
+          echo "Response: $RESP"
+          echo "$RESP" | grep -q '"ok":true' || { echo "Send failed"; exit 1; }
+          echo "✓ Test message sent successfully"
