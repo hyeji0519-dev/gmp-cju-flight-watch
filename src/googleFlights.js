@@ -3,102 +3,89 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 
 const clean = (value = '') => value.replace(/\s+/g, ' ').trim();
+
 export const hasBookablePrice = (text) => {
   if (/total price is unavailable|price unavailable/i.test(text)) return false;
-  return /₩\s*[\d,]+|[\d,]+\s*(?:Korean won|KRW)/i.test(text);
-};
-const time24 = (text) => {
-  const m = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-  if (!m) return null;
-  let hour = Number(m[1]) % 12;
-  if (m[3].toUpperCase() === 'PM') hour += 12;
-  return `${String(hour).padStart(2, '0')}:${m[2]}`;
+  return /₩\s*[\d,]+|\b[\d,]+\s*(?:Korean won|KRW)\b/i.test(text);
 };
 
-async function clickNamed(page, names) {
-  for (const name of names) {
-    const target = page.getByRole('button', { name, exact: false }).first();
-    if (await target.count()) { await target.click(); return; }
+const time24 = (h, m, ampm) => {
+  let hour = Number(h) % 12;
+  if (/PM/i.test(ampm)) hour += 12;
+  return `${String(hour).padStart(2, '0')}:${m}`;
+};
+
+// tfs: Google Flights search parameter (base64 protobuf).
+// Structure discovered by inspection: trip type + fixed byte + outbound leg + return leg + trailing.
+// Always encoded as round-trip because one-way tfs codes get normalized back to round-trip anyway;
+// we parse the "Departing flights" section which is the outbound leg either way.
+function buildTfs(outbound, returnLeg) {
+  const bytes = [
+    0x08, 0x1c,   // trip type: round trip
+    0x10, 0x02    // fixed
+  ];
+  const appendLeg = (leg) => {
+    bytes.push(0x1a, 0x1e, 0x12, 0x0a);
+    for (const c of leg.date) bytes.push(c.charCodeAt(0));
+    bytes.push(0x6a, 0x07, 0x08, 0x01, 0x12, 0x03);
+    for (const c of leg.from) bytes.push(c.charCodeAt(0));
+    bytes.push(0x72, 0x07, 0x08, 0x01, 0x12, 0x03);
+    for (const c of leg.to) bytes.push(c.charCodeAt(0));
+  };
+  appendLeg(outbound);
+  appendLeg(returnLeg);
+  bytes.push(
+    0x40, 0x01, 0x48, 0x01, 0x70, 0x01,
+    0x82, 0x01, 0x0b,
+    0x08, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01,
+    0x98, 0x01, 0x01
+  );
+  return Buffer.from(bytes).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+function buildSearchUrl(leg) {
+  // Pair the leg we care about with an arbitrary return leg (+7 days). We only ever parse the
+  // outbound section, so the return leg is discarded downstream.
+  const dt = new Date(`${leg.date}T00:00:00Z`);
+  dt.setUTCDate(dt.getUTCDate() + 7);
+  const returnDate = dt.toISOString().slice(0, 10);
+  const dummy = { from: leg.to, to: leg.from, date: returnDate };
+  const tfs = buildTfs(leg, dummy);
+  return `https://www.google.com/travel/flights?hl=en&curr=KRW&tfs=${tfs}`;
+}
+
+async function setPassengerCount(page, adults) {
+  if (adults <= 1) return;
+  const paxBtn = page.locator('button[aria-label*="passenger"]').first();
+  await paxBtn.click();
+  await page.waitForTimeout(600);
+  const addAdult = page.locator('button[aria-label="Add adult"]').first();
+  for (let i = 1; i < adults; i += 1) {
+    await addAdult.click();
+    await page.waitForTimeout(150);
   }
-  throw new Error(`버튼을 찾지 못함: ${names.join(', ')}`);
+  // Done button — the FIRST visible <button> whose exact text is "Done"
+  const doneBtn = page.locator('button').filter({ hasText: /^Done$/ }).first();
+  await doneBtn.click();
+  await page.waitForTimeout(2500); // let results refresh
 }
 
-async function clickVisible(locator) {
-  for (let i = 0; i < await locator.count(); i += 1) {
-    const candidate = locator.nth(i);
-    if (await candidate.isVisible()) { await candidate.click(); return; }
-  }
-  throw new Error('화면에 보이는 버튼을 찾지 못했습니다.');
-}
-
-async function setAirport(page, label, code) {
-  const field = page.locator(`[aria-label^="${label}"]`).first();
-  await field.click();
-  const kind = /from/i.test(label) ? 'origin' : 'destination';
-  const dialog = page.getByRole('dialog', { name: `Enter your ${kind}` });
-  const input = dialog.getByRole('combobox').first();
-  await input.fill(code);
-  await page.waitForTimeout(800);
-  await page.locator(`[aria-label*="(${code})"]`).first().click();
-}
-
-async function setPassengers(page, passengers) {
-  await page.locator('[aria-label="1 passenger"], [aria-label*="passengers"]').first().click();
-  const addAdult = page.locator('button[aria-label="Add adult"]').last();
-  const addChild = page.locator('button[aria-label="Add child aged 2 to 11"]').last();
-  if (!await addAdult.count() || !await addChild.count()) throw new Error('승객 추가 버튼 구조를 인식하지 못했습니다.');
-  for (let i = 1; i < passengers.adults; i += 1) await addAdult.click();
-  for (let i = 0; i < passengers.children; i += 1) await addChild.click();
-  await clickNamed(page, [/done/i]);
-}
-
-async function selectCalendarDate(page, iso) {
-  const label = new Intl.DateTimeFormat('en-US', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC'
-  }).format(new Date(`${iso}T12:00:00Z`));
-  for (let month = 0; month < 18; month += 1) {
-    const day = page.locator(`[aria-label="${label}"]`).last();
-    if (await day.count() && await day.isVisible()) { await day.click(); return; }
-    await page.locator('button[aria-label="Next"]').last().click();
-  }
-  throw new Error(`달력에서 날짜를 찾지 못했습니다: ${label}`);
-}
-
-async function setOneWay(page) {
-  await page.locator('[role="combobox"]').filter({ hasText: 'Round trip' }).first().click();
-  await page.getByRole('option', { name: /One way/i }).click();
-}
-
-async function setDate(page, date) {
-  const departure = page.locator('input[aria-label="Departure"]').first();
-  await departure.click();
-  await selectCalendarDate(page, date);
-  const calendar = page.getByRole('dialog').last();
-  await clickVisible(page.getByRole('button', { name: /^Done/ }));
-  await calendar.waitFor({ state: 'hidden', timeout: 10000 });
-}
-
-async function cards(page) {
-  const result = page.locator('[aria-label*="flight with"][aria-label$="Select flight"]');
-  await result.first().waitFor({ state: 'visible', timeout: 90000 });
-  return result;
-}
-
-async function parseCard(card, date) {
-  const label = clean(await card.getAttribute('aria-label'));
-  const text = `${label} ${clean(await card.innerText())}`;
-  const times = [...text.matchAll(/\b\d{1,2}:\d{2}\s*(?:AM|PM)\b/gi)].map((m) => time24(m[0])).filter(Boolean);
-  const flight = text.match(/\b([A-Z0-9]{2})\s?(\d{2,4})\b/);
-  const price = text.match(/₩\s*[\d,]+|[\d,]+\s*(?:Korean won|KRW)/i)?.[0] || null;
-  const airline = label.match(/flight with (.+?)\. Leaves/i)?.[1] || '항공사 확인 필요';
+function parseAriaLabel(label, date) {
+  const priceMatch = label.match(/From\s+([\d,]+)\s+(?:South\s+Korean\s+won|KRW|₩)/i)
+    || label.match(/₩\s*([\d,]+)/);
+  const bookable = hasBookablePrice(label);
+  const airlineMatch = label.match(/Nonstop flight with ([^.]+?)\./i)
+    || label.match(/flight with ([^.]+?)\./i);
+  const depMatch = label.match(/Leaves\s+.+?\s+at\s+(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  const arrMatch = label.match(/arrives at\s+.+?\s+at\s+(\d{1,2}):(\d{2})\s*(AM|PM)/i);
   return {
-    airline,
-    flightNumber: flight ? `${flight[1]}${flight[2]}` : '편명 확인 필요',
+    airline: airlineMatch ? clean(airlineMatch[1]) : '항공사 확인 필요',
+    flightNumber: '편명 별도 확인',
     date,
-    departure: times[0],
-    arrival: times[1],
-    price,
-    bookable: hasBookablePrice(text)
+    departure: depMatch ? time24(depMatch[1], depMatch[2], depMatch[3]) : null,
+    arrival: arrMatch ? time24(arrMatch[1], arrMatch[2], arrMatch[3]) : null,
+    price: priceMatch ? `₩${priceMatch[1]}` : null,
+    bookable
   };
 }
 
@@ -108,22 +95,25 @@ async function searchOneWay(config, type, leg, notBefore = '00:00') {
   const context = await browser.newContext({ locale: 'en-US', timezoneId: config.timezone });
   const page = await context.newPage();
   try {
-    await page.goto(config.searchUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    const url = buildSearchUrl(leg);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
     if (/captcha|unusual traffic/i.test(await page.title()) || await page.locator('iframe[src*="recaptcha"]').count()) {
       throw new Error('Google이 CAPTCHA 또는 비정상 트래픽 확인을 요구했습니다(우회하지 않음).');
     }
-    await setOneWay(page);
-    await setPassengers(page, config.passengers);
-    await setAirport(page, 'Where from', leg.from);
-    await setAirport(page, 'Where to', leg.to);
-    await setDate(page, leg.date);
-    await page.locator('button[aria-label="Search"]').click();
+    // Wait for the passenger UI to render (marker that the SPA has hydrated).
+    await page.locator('button[aria-label*="passenger"]').first().waitFor({ state: 'visible', timeout: 60000 });
+    await setPassengerCount(page, config.passengers.adults);
+    const cards = page.locator('div[role="link"][aria-label*="Nonstop flight with"]');
+    await cards.first().waitFor({ state: 'visible', timeout: 90000 });
 
     const results = [];
-    const found = await cards(page);
-    for (let i = 0; i < Math.min(await found.count(), 50); i += 1) {
-      const parsed = await parseCard(found.nth(i), leg.date);
-      if (!parsed.bookable || !parsed.departure || !parsed.arrival || parsed.departure < notBefore) continue;
+    const total = Math.min(await cards.count(), 60);
+    for (let i = 0; i < total; i += 1) {
+      const label = await cards.nth(i).getAttribute('aria-label');
+      if (!label) continue;
+      const parsed = parseAriaLabel(label, leg.date);
+      if (!parsed.bookable || !parsed.departure || !parsed.arrival) continue;
+      if (parsed.departure < notBefore) continue;
       results.push({ type, leg: parsed, price: parsed.price, url: page.url() });
       if (results.length >= config.maxResults) break;
     }
