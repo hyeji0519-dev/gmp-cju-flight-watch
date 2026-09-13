@@ -6,7 +6,8 @@ const clean = (value = '') => value.replace(/\s+/g, ' ').trim();
 
 export const hasBookablePrice = (text) => {
   if (/total price is unavailable|price unavailable/i.test(text)) return false;
-  return /₩\s*[\d,]+|\b[\d,]+\s*(?:Korean won|KRW)\b/i.test(text);
+  // Google aria-label: "From 99600 South Korean won round trip total." (no thousands separator, 'South' before 'Korean')
+  return /₩\s*[\d,]+|\b[\d,]+\s*(?:South\s+)?Korean\s+won\b|\b[\d,]+\s*KRW\b/i.test(text);
 };
 
 const time24 = (h, m, ampm) => {

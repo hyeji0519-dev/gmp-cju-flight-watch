@@ -10,5 +10,6 @@ test('가격을 제공하지 않는 운항 스케줄은 예약 가능으로 보�
 test('실제 원화 총가격이 표시된 결과만 예약 가능 후보로 본다', () => {
   assert.equal(hasBookablePrice('₩425,600 round trip'), true);
   assert.equal(hasBookablePrice('425,600 Korean won round trip'), true);
+  assert.equal(hasBookablePrice('From 99600 South Korean won round trip total. Nonstop flight with Air Seoul.'), true);
   assert.equal(hasBookablePrice('Schedule only'), false);
 });
