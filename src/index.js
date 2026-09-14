@@ -16,8 +16,8 @@ try {
   const unseen = unseenItineraries(matches, state);
   console.log(`예약 가능 편도 ${matches.length}개, 새 항공편 ${unseen.length}개.`);
   for (const item of unseen) {
-    if (process.env.DRY_RUN === '1') console.log(formatMatch(item, now.toFormat('yyyy-LL-dd HH:mm:ss')));
-    else await sendTelegram(formatMatch(item, now.toFormat('yyyy-LL-dd HH:mm:ss')));
+    if (process.env.DRY_RUN === '1') console.log(formatMatch(item, now.toFormat('yyyy-LL-dd HH:mm:ss'), config.passengers.adults));
+    else await sendTelegram(formatMatch(item, now.toFormat('yyyy-LL-dd HH:mm:ss'), config.passengers.adults));
   }
   await saveState(config.stateFile, markSuccess(state, matches));
 } catch (error) {

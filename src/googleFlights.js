@@ -71,7 +71,7 @@ async function setPassengerCount(page, adults) {
   await page.waitForTimeout(2500); // let results refresh
 }
 
-function parseAriaLabel(label, date) {
+function parseAriaLabel(label, leg) {
   const priceMatch = label.match(/From\s+([\d,]+)\s+(?:South\s+Korean\s+won|KRW|₩)/i)
     || label.match(/₩\s*([\d,]+)/);
   const bookable = hasBookablePrice(label);
@@ -82,7 +82,9 @@ function parseAriaLabel(label, date) {
   return {
     airline: airlineMatch ? clean(airlineMatch[1]) : '항공사 확인 필요',
     flightNumber: '편명 별도 확인',
-    date,
+    from: leg.from,
+    to: leg.to,
+    date: leg.date,
     departure: depMatch ? time24(depMatch[1], depMatch[2], depMatch[3]) : null,
     arrival: arrMatch ? time24(arrMatch[1], arrMatch[2], arrMatch[3]) : null,
     price: priceMatch ? `₩${priceMatch[1]}` : null,
@@ -112,7 +114,7 @@ async function searchOneWay(config, type, leg, notBefore = '00:00') {
     for (let i = 0; i < total; i += 1) {
       const label = await cards.nth(i).getAttribute('aria-label');
       if (!label) continue;
-      const parsed = parseAriaLabel(label, leg.date);
+      const parsed = parseAriaLabel(label, leg);
       if (!parsed.bookable || !parsed.departure || !parsed.arrival) continue;
       if (parsed.departure < notBefore) continue;
       results.push({ type, leg: parsed, price: parsed.price, url: page.url() });
@@ -130,17 +132,18 @@ async function searchOneWay(config, type, leg, notBefore = '00:00') {
 
 export async function searchGoogleFlights(config) {
   const MAX_ATTEMPTS = 3;
-  const inbounds = config.inbounds ?? (config.inbound ? [config.inbound] : []);
+  const legs = config.legs ?? [];
+  if (legs.length === 0) throw new Error('감시할 구간(config.legs)이 비어 있습니다.');
   let lastError;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
-      const outbound = await searchOneWay(config, 'outbound', config.outbound, config.outbound.notBefore);
-      const inboundResults = [];
-      for (const leg of inbounds) {
-        const legResults = await searchOneWay(config, `inbound-${leg.date}`, leg);
-        inboundResults.push(...legResults);
+      const results = [];
+      for (const leg of legs) {
+        const type = leg.type || `${leg.from}-${leg.to}-${leg.date}`;
+        const legResults = await searchOneWay(config, type, leg, leg.notBefore || '00:00');
+        results.push(...legResults);
       }
-      return [...outbound, ...inboundResults].slice(0, config.maxResults);
+      return results.slice(0, config.maxResults);
     } catch (error) {
       lastError = error;
       if (attempt < MAX_ATTEMPTS) {
