@@ -1,18 +1,20 @@
 import { DateTime } from 'luxon';
-import { config, isExpired } from './config.js';
+import { activeLegs, config, isExpired } from './config.js';
 import { searchGoogleFlights } from './googleFlights.js';
 import { loadState, markFailure, markSuccess, saveState, unseenItineraries } from './state.js';
 import { formatMatch, sendTelegram } from './telegram.js';
 
 const now = DateTime.now().setZone(config.timezone);
 if (isExpired(now)) {
-  console.log(`조회 종료 시각(${config.stopAt})이 지나 정상 종료합니다.`);
+  console.log('모든 감시 구간의 출발 시간대가 지나 정상 종료합니다.');
   process.exit(0);
 }
 
 const state = await loadState(config.stateFile);
 try {
-  const matches = await searchGoogleFlights(config);
+  const legs = activeLegs(now);
+  console.log(`감시 구간: ${legs.map((leg) => `${leg.date} ${leg.from}→${leg.to} ${leg.notBefore || '00:00'} 이후`).join(', ')}`);
+  const matches = await searchGoogleFlights({ ...config, legs });
   const unseen = unseenItineraries(matches, state);
   console.log(`예약 가능 편도 ${matches.length}개, 새 항공편 ${unseen.length}개.`);
   for (const item of unseen) {
